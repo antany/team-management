@@ -117,6 +117,7 @@ public class SyncService {
         }
         if (e.key().equals("leaves") && !Entities.LEAVE_TYPES.contains(v.get("type"))) throw new IllegalArgumentException("type");
         if (e.key().equals("leaves") && "OTHER".equals(v.get("type")) && String.valueOf(v.get("note")).isBlank()) throw new IllegalArgumentException("reason");
+        if (e.key().equals("members") && !Entities.MEMBER_CATEGORIES.contains(v.get("category"))) throw new IllegalArgumentException("category");
         if (e.key().equals("notes") && !Entities.NOTE_CATEGORIES.contains(v.get("category"))) throw new IllegalArgumentException("category");
         if (e.key().equals("allocations")) {
             int p = (Integer) v.get("percent");

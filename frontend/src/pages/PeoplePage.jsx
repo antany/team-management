@@ -6,6 +6,7 @@ import { activeMembers, liveAllocations, liveMembers, openFollowUps, useStore } 
 import { useSettings } from '../db/settings';
 import { today } from '../db/util';
 import { availabilityOn } from '../logic/availability';
+import { TEAMS } from '../logic/category';
 import { loadOn } from '../logic/allocation';
 import { Empty, MemberAvatar, PageHeader } from '../components/ui';
 import { MemberDialog } from '../components/Dialogs';
@@ -39,7 +40,7 @@ export default function PeoplePage() {
                 <MemberAvatar member={m} size={44} />
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   <Typography variant="subtitle1" noWrap>{m.name}</Typography>
-                  <Typography variant="body2" color="text.secondary" noWrap>{m.title || 'No title'}{m.archived ? ' · archived' : ''}</Typography>
+                  <Typography variant="body2" color="text.secondary" noWrap>{TEAMS[m.category] ? `${TEAMS[m.category].label} · ` : ''}{m.title || 'No title'}{m.archived ? ' · archived' : ''}</Typography>
                 </Box>
                 <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', justifyContent: 'flex-end', rowGap: 0.5 }}>
                   {outToday.has(m.id) && <Chip size="small" color="info" label="Out today" />}

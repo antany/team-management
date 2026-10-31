@@ -5,6 +5,7 @@ import { create, remove, restore, update, useStore, activeMembers } from '../db/
 import { addDays, today } from '../db/util';
 import { LEAVE_TYPES, leaveTypeChoices } from '../logic/availability';
 import { CATEGORIES } from '../logic/review';
+import { TEAMS } from '../logic/category';
 import { useToast } from '../toast';
 
 const dateProps = { type: 'date', slotProps: { inputLabel: { shrink: true } } };
@@ -26,10 +27,10 @@ function useDeleter(table, row, onClose, label) {
 }
 
 export function MemberDialog({ open, onClose, member }) {
-  const [d, set] = useDraft(open, { name: member?.name ?? '', title: member?.title ?? '', startDate: member?.startDate ?? '', about: member?.about ?? '', email: member?.email ?? '', phone: member?.phone ?? '', emergencyContact: member?.emergencyContact ?? '' });
+  const [d, set] = useDraft(open, { name: member?.name ?? '', title: member?.title ?? '', startDate: member?.startDate ?? '', about: member?.about ?? '', email: member?.email ?? '', phone: member?.phone ?? '', emergencyContact: member?.emergencyContact ?? '', category: member?.category ?? '' });
   const del = useDeleter('members', member ?? {}, onClose, 'Team member');
   const save = () => {
-    const fields = { name: d.name.trim(), title: d.title.trim(), startDate: d.startDate || null, about: d.about, email: d.email.trim(), phone: d.phone.trim(), emergencyContact: d.emergencyContact.trim() };
+    const fields = { name: d.name.trim(), title: d.title.trim(), startDate: d.startDate || null, about: d.about, email: d.email.trim(), phone: d.phone.trim(), emergencyContact: d.emergencyContact.trim(), category: d.category };
     if (member) update('members', member.id, fields);
     else create('members', { ...fields, archived: false });
     onClose();
@@ -38,6 +39,10 @@ export function MemberDialog({ open, onClose, member }) {
     <FormDialog open={open} title={member ? 'Edit team member' : 'Add team member'} onClose={onClose} onSubmit={save} valid={!!d.name.trim()} onDelete={member ? del : undefined}>
       <TextField name="name" label="Name" value={d.name} onChange={(e) => set({ name: e.target.value })} autoFocus required />
       <TextField name="title" label="Role / title" value={d.title} onChange={(e) => set({ title: e.target.value })} />
+      <TextField select name="category" label="Team" value={d.category} onChange={(e) => set({ category: e.target.value })} slotProps={{ select: { native: true }, inputLabel: { shrink: true } }}>
+        <option value="">None</option>
+        {Object.entries(TEAMS).map(([k, c]) => <option key={k} value={k}>{c.label}</option>)}
+      </TextField>
       <TextField name="startDate" label="Start date" value={d.startDate} onChange={(e) => set({ startDate: e.target.value })} {...dateProps} />
       <TextField name="email" label="Email" type="email" value={d.email} onChange={(e) => set({ email: e.target.value })} autoComplete="off" />
       <TextField name="phone" label="Phone" type="tel" value={d.phone} onChange={(e) => set({ phone: e.target.value })} autoComplete="off" />

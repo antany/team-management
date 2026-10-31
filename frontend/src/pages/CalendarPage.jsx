@@ -7,17 +7,13 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { activeMembers, useStore } from '../db/store';
 import { useSettings } from '../db/settings';
 import { addDays, addMonths, eachDay, fromDateStr, isWeekend, mondayOf, monthLabel, monthStart, rangeLabel, shortDate, today } from '../db/util';
-import { leaveLabel, levelOf, outByDay, upcomingConflicts } from '../logic/availability';
+import { leaveLabel, outByDay, upcomingConflicts } from '../logic/availability';
+import { TEAMS, categoryCoverage } from '../logic/category';
 import { AvailabilityPanel } from '../components/Availability';
 import { HolidayDialog, LeaveDialog } from '../components/Dialogs';
 import { MemberAvatar, PageHeader } from '../components/ui';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-function levelColor(theme, level) {
-  const p = { one: theme.palette.info.main, multi: theme.palette.warning.main, high: theme.palette.error.main }[level];
-  return p;
-}
 
 export default function CalendarPage() {
   const state = useStore();
@@ -66,24 +62,32 @@ export default function CalendarPage() {
           {WEEKDAYS.map((d) => <Typography key={d} variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>{d}</Typography>)}
           {eachDay(gridStart, gridEnd).map((day) => {
             const people = out.get(day) ?? [];
-            const level = levelOf(people.length, maxOut);
-            const c = levelColor(theme, level);
             const inMonth = day.slice(0, 7) === monthFirst.slice(0, 7);
             const holiday = holidayNames.get(day);
+            const teams = people.length ? categoryCoverage(members, new Set(people.map((o) => o.member.id))).filter((t) => t.out > 0) : [];
             return (
               <Box
                 key={day} component="button" type="button" onClick={() => setSelected(day)}
-                data-day={day} data-level={level} data-out={people.length}
+                data-day={day} data-out={people.length}
                 aria-label={`${day}${people.length ? `, ${people.length} out` : ''}${holiday ? `, ${holiday}` : ''}`}
                 sx={{
                   font: 'inherit', color: 'text.primary', cursor: 'pointer', textAlign: 'left', p: 0.5, minHeight: { xs: 54, md: 72 },
-                  borderRadius: '10px', border: 2, borderColor: selected === day ? 'primary.main' : c ? alpha(c, 0.7) : 'divider',
-                  bgcolor: c ? alpha(c, level === 'high' ? 0.32 : level === 'multi' ? 0.24 : 0.12) : holiday || isWeekend(day) ? alpha(theme.palette.text.primary, 0.05) : 'transparent',
+                  borderRadius: '10px', border: 2, borderColor: selected === day ? 'primary.main' : 'divider',
+                  bgcolor: holiday || isWeekend(day) ? alpha(theme.palette.text.primary, 0.05) : 'transparent',
                   opacity: inMonth ? 1 : 0.45, display: 'flex', flexDirection: 'column', gap: 0.25, overflow: 'hidden',
                 }}
               >
                 <Typography variant="caption" sx={{ fontWeight: day === today() ? 800 : 500, color: day === today() ? 'primary.main' : undefined }}>{fromDateStr(day).getDate()}</Typography>
-                {people.length > 0 && <Typography variant="caption" sx={{ fontWeight: 700, lineHeight: 1.1, color: c }}>{people.length} out</Typography>}
+                {teams.length > 0 && (
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '2px' }}>
+                    {teams.map((t) => (
+                      <Box key={t.key} data-team={t.key} data-status={t.status} title={`${TEAMS[t.key].label}: ${t.out} of ${t.total} out`}
+                        sx={{ px: '4px', borderRadius: '6px', bgcolor: t.color, color: '#fff', fontSize: 10, fontWeight: 700, lineHeight: 1.4 }}>
+                        <Box component="span" sx={{ display: { xs: 'none', md: 'inline' } }}>{TEAMS[t.key].label} </Box>{t.out}/{t.total}
+                      </Box>
+                    ))}
+                  </Box>
+                )}
                 {holiday && <Typography variant="caption" sx={{ lineHeight: 1.1, fontSize: 10, display: { xs: 'none', md: 'block' } }}>{holiday}</Typography>}
                 {holiday && <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'text.secondary', display: { md: 'none' } }} />}
               </Box>
@@ -91,8 +95,14 @@ export default function CalendarPage() {
           })}
         </Box>
       ) : (
-        <WeekGrid members={members} week={weekStart} out={out} holidayNames={holidayNames} maxOut={maxOut} selected={selected} onSelect={setSelected} theme={theme} />
+        <WeekGrid members={members} week={weekStart} out={out} holidayNames={holidayNames} selected={selected} onSelect={setSelected} theme={theme} />
       )}
+
+      <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1, mb: 2, alignItems: 'center' }} data-testid="team-legend">
+        {Object.entries(TEAMS).map(([k, t]) => <Chip key={k} size="small" label={t.label} sx={{ bgcolor: t.color, color: '#fff', fontWeight: 700 }} />)}
+        <Chip size="small" label="Over half out" sx={{ bgcolor: '#ed6c02', color: '#fff', fontWeight: 700 }} />
+        <Chip size="small" label="All out" sx={{ bgcolor: '#d32f2f', color: '#fff', fontWeight: 700 }} />
+      </Stack>
 
       <Card sx={{ mb: 2 }}>
         <CardContent><AvailabilityPanel date={selected} onHoliday={(date, row) => setHolidayDialog({ date, row })} /></CardContent>
@@ -125,7 +135,7 @@ export default function CalendarPage() {
 }
 
 /** Members down, Monday to Friday across: who is out when, plus a coverage row. */
-function WeekGrid({ members, week, out, holidayNames, maxOut, selected, onSelect, theme }) {
+function WeekGrid({ members, week, out, holidayNames, selected, onSelect, theme }) {
   const days = eachDay(week, addDays(week, 4));
   const SHORT = { VACATION: 'Vacation', SICK: 'Sick', PERSONAL: 'Personal', HOLIDAY: 'Day off', OTHER: 'Other' };
   return (
@@ -143,6 +153,7 @@ function WeekGrid({ members, week, out, holidayNames, maxOut, selected, onSelect
         {members.map((m) => (
           <Box key={m.id} sx={{ display: 'contents' }}>
             <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
+              <Box sx={{ width: 4, alignSelf: 'stretch', borderRadius: 2, bgcolor: TEAMS[m.category]?.color ?? 'transparent' }} />
               <MemberAvatar member={m} size={22} />
               <Typography variant="body2" noWrap>{m.name}</Typography>
             </Stack>
@@ -159,18 +170,19 @@ function WeekGrid({ members, week, out, holidayNames, maxOut, selected, onSelect
             })}
           </Box>
         ))}
-        <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>Coverage</Typography>
-        {days.map((d) => {
-          const n = (out.get(d) ?? []).length;
-          const level = levelOf(n, maxOut);
-          const c = levelColor(theme, level);
-          const off = holidayNames.has(d);
-          return (
-            <Box key={d} data-coverage={d} data-level={level} sx={{ textAlign: 'center', borderRadius: '8px', p: 0.5, bgcolor: c ? alpha(c, level === 'high' ? 0.32 : 0.22) : 'transparent' }}>
-              <Typography variant="caption" sx={{ fontWeight: 700 }}>{off ? 'Holiday' : `${members.length - n}/${members.length}`}</Typography>
-            </Box>
-          );
-        })}
+        {Object.keys(TEAMS).filter((k) => members.some((m) => m.category === k)).map((k) => (
+          <Box key={k} sx={{ display: 'contents' }}>
+            <Typography variant="caption" sx={{ alignSelf: 'center', fontWeight: 700, color: TEAMS[k].color }}>{TEAMS[k].label} out</Typography>
+            {days.map((d) => {
+              const t = categoryCoverage(members, new Set((out.get(d) ?? []).map((o) => o.member.id))).find((c) => c.key === k);
+              return (
+                <Box key={d} data-team-cell={`${k}:${d}`} data-status={t.status} sx={{ textAlign: 'center', borderRadius: '8px', p: 0.25, bgcolor: alpha(t.color, t.status === 'ok' ? 0.12 : 0.85), color: t.status === 'ok' ? 'text.primary' : '#fff' }}>
+                  <Typography variant="caption" sx={{ fontWeight: 700 }}>{holidayNames.has(d) ? '–' : `${t.out}/${t.total}`}</Typography>
+                </Box>
+              );
+            })}
+          </Box>
+        ))}
       </Box>
       {members.length === 0 && <Chip label="Add team members to see availability" sx={{ mt: 1 }} />}
     </Box>

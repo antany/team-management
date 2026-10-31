@@ -27,13 +27,15 @@ final class Entities {
     }
 
     static final List<String> LEAVE_TYPES = List.of("VACATION", "SICK", "PERSONAL", "OTHER", "HOLIDAY");
+    static final List<String> MEMBER_CATEGORIES = List.of("", "DEV", "BSA", "QA", "ENGINEER");
     static final List<String> NOTE_CATEGORIES = List.of("ONE_ON_ONE", "FEEDBACK", "KUDOS", "CONCERN", "GOAL", "OTHER");
 
     static final List<Entity> ALL = List.of(
         new Entity("members", "team_member", false, List.of(
             text("name", true, 120), text("title", false, 120), date("startDate", false),
             text("about", false, 10_000), bool("archived"),
-            text("email", false, 200), text("phone", false, 60), text("emergencyContact", false, 300))),
+            text("email", false, 200), text("phone", false, 60), text("emergencyContact", false, 300),
+            text("category", false, 20))),
         new Entity("leaves", "leave_entry", true, List.of(
             date("startDate", true), date("endDate", true), text("type", true, 20), text("note", false, 2_000))),
         new Entity("allocations", "allocation", true, List.of(

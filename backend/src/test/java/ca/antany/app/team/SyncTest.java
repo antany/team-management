@@ -119,6 +119,18 @@ class SyncTest extends IntegrationTestBase {
     }
 
     @Test
+    void memberTeamIsStoredAndValidated() throws Exception {
+        MockHttpSession a = signUp("team");
+        Map<String, Object> dev = member(UUID.randomUUID(), "Dev", 0);
+        dev.put("category", "DEV");
+        Map<String, Object> bad = member(UUID.randomUUID(), "Bad", 0);
+        bad.put("category", "CEO");
+        String r = sync(a, 0, changes(List.of(dev, bad), List.of(), List.of(), List.of()));
+        assertEquals(1, ((List<?>) JsonPath.read(r, "$.rejected")).size());
+        assertEquals("DEV", JsonPath.read(r, "$.changes.members[0].category"));
+    }
+
+    @Test
     void anonymousCannotSync() throws Exception {
         call("/api/sync", Map.of("cursor", 0)).andExpect(status().isUnauthorized());
     }

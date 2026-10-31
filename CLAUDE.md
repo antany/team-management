@@ -1,0 +1,60 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+Team Manager PWA for one manager per account: team members (with contact details), a leave calendar (conflict highlighting, who-is-available views, Ontario + federal holidays), work allocation (% of time per project), notes with follow-up dates, and rules-based review-prep summaries. **Username + password only** (no Google, no email). Offline-first (localStorage), optional PIN app lock with an encrypted local cache. Gradle (Groovy DSL) multi-project: `backend` (Spring Boot 4, Java 25, **JDBC only, no JPA**, Postgres, Flyway) and `frontend` (React + plain JSX + Material UI + Vite). Java package: `ca.antany.app.team`. Sibling `/home/antany/todo-app` has the same plumbing (copy patterns from it, do not depend on it). People-facing guide: `docs/usage-and-deployment.html`.
+
+## Status
+
+All 8 planned steps are built and browser-tested (see "Testing"), plus later additions: member contact info, PIN-encrypted backups with restore, custom holidays. **Not deployed.** Untested: installed-phone behaviour, the Cloudflare tunnel container, https-only features on a real domain (WebCrypto works on localhost, so the PIN encryption was tested there). Not built on purpose: server-side settings sync (settings are per device), activity log per note, push notifications for follow-ups, password reset (no email).
+
+## Commands
+
+Node is **never run on the host**: every npm command runs in a `node:22` podman container via Gradle `Exec` tasks (`frontend/build.gradle`). Don't run `npm` directly.
+
+```bash
+podman kube play podman/postgres.yaml     # dev Postgres (team/team/team) on host port 5434
+./gradlew :backend:bootRun                # builds frontend, serves app + API on :8081 under /team (todo-app uses :8080)
+./gradlew :frontend:dev                   # Vite dev server on :5173, proxies /team/api to :8081
+./gradlew :backend:processResources       # rebuild only the frontend bundle (Spring serves the classpath dir; no restart)
+./gradlew :backend:bootJar                # backend/build/libs/backend-0.1.0.jar with the React bundle under static/
+./gradlew :backend:test                   # needs `systemctl --user start podman.socket`
+podman build -f podman/Containerfile -t localhost/team-management:latest .   # after bootJar; deploy with podman/team-pod.yaml
+```
+
+App URL: `http://localhost:8081/team/` (context path `/team` must match `base` in `frontend/vite.config.js`). There is no lint or type-check: the frontend is plain JS, so verify UI changes in a real browser. Browser testing used host `chromium --headless=new --remote-debugging-port=9222` plus `puppeteer-core` run **inside a node podman container** with `--network=host`; scratch scripts live in the session scratchpad, not in the repo. Don't `pkill -f <pattern>` if the pattern is in your own command line.
+
+## Architecture
+
+**Auth (`auth/`, `user/`)**: `POST /api/auth/register|login|password`, public `GET /api/auth/options` (`{passwordSignup}`), `GET /api/me`, logout `POST /api/auth/logout`. Username `[a-z0-9][a-z0-9._-]{2,29}` (case-insensitive), password 8+ chars and at most 72 UTF-8 bytes, bcrypt via the delegating encoder. Only username + hash are stored. `LoginThrottle` (in memory): 5 failures per username, 30 per IP, 10 registrations per IP per 15 min, then 429; behind a proxy set `SERVER_FORWARD_HEADERS_STRATEGY=framework` so the IP is real. `APP_PASSWORD_SIGNUP=false` closes registration. Session is 14 days (`server.servlet.session.timeout`); principal name is `u:<user id>` (`CurrentUser`). CSRF: cookie `XSRF-TOKEN` echoed as `X-XSRF-TOKEN` (`frontend/src/api.js`). **There is no password reset**; an operator can only set a new `{bcrypt}` hash in the DB.
+
+**Persistence**: `JdbcClient` only. Flyway `V1__init.sql`; never edit an applied migration, add `V<n>`. Tables `team_member` (name, title, start_date, about, email, phone, emergency_contact, archived), `leave_entry`, `allocation`, `member_note`, `custom_holiday` (V3) (all with `user_id`, client-generated UUID id, `updated_at`, `deleted` tombstone, `seq` from `change_seq`). Calendar dates are `date` columns / `YYYY-MM-DD` strings (no time zone).
+
+**Sync (`sync/`)**: `POST /api/sync` body `{cursor, changes:{members,leaves,allocations,notes,holidays}}` -> `{cursor, changes, rejected[]}`, one transaction. The five tables are described once in `Entities.java` (column name, type, required, max length); `SyncRepository` builds the SQL from that and `SyncService` validates generically plus per-entity rules (leave type, note category, end >= start, percent 0..200). **Adding a field = a new Flyway migration + a `Col` in `Entities` + the client form.** Semantics copied from todo-app: last-write-wins per row by client `updatedAt` (clamped to now+5min, ms precision, tie keeps server), upsert `where t.updated_at < excluded.updated_at and t.user_id = excluded.user_id`, advisory lock per transaction so seq order = commit order, pull = rows with `seq > cursor` plus the current copy of any pushed row. Rejections (`forbidden` = id belongs to another manager, `missing_parent` = member unknown, `invalid`) never fail the request. Rows are always filtered by `user_id`: a manager never sees another's data.
+
+**Frontend (`frontend/src`)**: plain JSX + MUI, indigo/cyan theme (`theme.js`, copied from todo-app; light/dark/system toggle, key `team.theme`). Routes: `/home /people /people/:id /calendar /work /notes /review /review/:id /settings`; **a new route must also be added to `web/SpaController`** (and `SpaForwardingTest`). The app always requires an account (`LoginPage` is shown when `useSession().me` is null).
+
+- `db/store.js` is the in-memory source of truth `{members, leaves, allocations, notes}` (rows carry `dirty`; deletes are tombstones; removing a member tombstones its leave/allocations/notes). `db/vault.js` persists it to localStorage `team.data`, either plain `{enc:false,data}` or AES-GCM `{enc:true,salt,iv,ct}`; `crypto.js` derives the key from the PIN (PBKDF2-SHA256 250k iterations). `team.owner` = account id of the cache, `team.sync` = `{cursor}`, `team.me` = cached account, `team.settings` = device settings (plain, readable while locked), `team.pinfails`.
+- **Lock (`lock.jsx`, `components/LockScreen.jsx`)**: reload locks (the key only lives in memory); locking calls `stopSync`, flushes, `vault.setLocked(true)` (**writes are refused while locked, otherwise a late sync response would write a partial plaintext cache**), clears the in-memory store and shows `LockScreen` with nothing rendered behind it. Idle (`idleMinutes`, default 2, activity = pointer/key/touch/scroll) and tab-hidden (`lockOnHide`, default on) both go to `/home` and lock (without a PIN they only go home). 5 wrong PINs = `wipeAndSignOut` (cache wiped, server logout; the data stays on the server, unsynced edits are lost). A different account signing in on the device wipes the previous cache first.
+- **Sign out** (`Settings`) first flushes a sync; if edits are unsynced (offline) it asks for confirmation, then wipes the cache. A 401 (expired session) only shows the login page and keeps the cache; the same account signing in again keeps it.
+- `sync/engine.js` runs only while signed in **and** unlocked: syncs ~2 s after a local change, on `online`, on tab visible, every 60 s, and `flushNow()` before sign out.
+- `logic/`: `holidays.js` (Ontario statutory, federal/bank = Remembrance Day Nov 11 + Truth and Reconciliation Sep 30, optional Civic Holiday; each group switchable; dates are the calendar day, weekend substitutions are not shown), `availability.js` (who is out per working day, levels none/one/multi/high, `upcomingConflicts`, leave vs allocation >= 80%), `allocation.js` (weekly load = highest day of the week, over 100% flagged), `review.js` (rules-based summary: leave days by type, per-project allocation while active, notes grouped by category, follow-up counts; Markdown export). **The review is built only from the manager's own notes; nothing is sent anywhere and there is no AI call. Keep it that way.**
+- Weekends and enabled holidays never count as "out". Leave spanning them is fine.
+
+**Backups (`backup/`, `frontend/src/backup.js`, `components/BackupSection.jsx`)**: backups are JSON **encrypted in the app with the PIN-derived key** (envelope `{app, version:1, enc:true, exportedAt, salt, iv, ct}`; the salt is the cache's, so reading an old backup needs the PIN that was set when it was made). The PIN never leaves the device, so the server cannot encrypt or read them: it is only a blob store. `PUT /api/backup/files/{date}` (client's local date; refuses anything that is not an encrypted envelope, i.e. plaintext rows are rejected; 20 MB cap), `GET /api/backup/files` (list), `GET /api/backup/files/{name}`; one file per manager per day under `app.backup.dir/<user id>/` (`APP_BACKUP_DIR`, default `./backups`, git-ignored), newest `app.backup.keep-days` (14) kept. `useDailyBackup` (App) uploads today's backup ~8 s after unlock and every 30 min if today's is missing, **only while unlocked with a PIN** (no PIN = no key = no backup; the server never makes plaintext backups). Restore (Settings): pick a server copy or a file, enter the PIN, choose Replace (data matches the backup, newer rows are tombstoned) or Add missing, a pre-restore copy is downloaded, the client decrypts and posts plaintext rows to `POST /api/backup/restore?mode=replace|merge` (`SyncService.restore`: rows written with the current time so they win LWW; another manager's ids are skipped), then syncs. In a deployment the backup dir must be a writable volume for uid 10001 (`podman unshare chown 10001:10001 <dir>` for a hostPath).
+
+**Custom holidays**: synced rows (`holidays`: `holidayDate`, `name`) added from the Calendar page ("Add holiday", or "Mark this day as a holiday" on the day panel); always on, count as non-working days like built-in ones (`holidayMap(from, to, enabled, custom)`), included in backups.
+
+## Testing
+
+Backend: `IntegrationTestBase` (one shared Postgres container; `signUp(prefix)` registers a throwaway manager and returns the session; every call uses a fresh client IP so the sign-up throttle does not trip). `AuthTest`, `SyncTest` (round trip, LWW, tombstones, tenant isolation, invalid rows, custom holidays), `BackupTest` (encrypted-only uploads, retention, privacy, restore replace/merge, foreign rows skipped), `SignupDisabledTest`, `SpaForwardingTest`. MockMvc has no error dispatch: assert error text with `status().reason(...)`.
+
+Browser (headless Chromium, real app) verified: register/login, calendar conflict highlighting incl. holiday exclusion, week grid and day availability, over-100% allocation, notes + follow-ups, review summary, PIN set (cache really encrypted: no names in localStorage), reload locks, wrong-PIN counter, lock now, idle timeout to Home, hidden-tab lock, contact info, encrypted backup (ciphertext only on the server) + restore from server and from an uploaded file (wrong PIN refused), custom holidays, offline edit then sync, 5 wrong PINs wipe + sign out, full restore from the server after re-login, phone viewport and dark mode. When driving forms with puppeteer, submit with Enter (the fixed bottom nav can cover buttons on phones).
+
+## Things to know
+
+- Settings (idle minutes, lock on hide, "too many out" threshold, holiday groups) are per device and not synced.
+- The PIN is 4-8 digits; with the cache encrypted, someone who copies localStorage can still brute-force a 4-6 digit PIN offline. Treat it as protection against a casual look or a lost unlocked device, not against a determined attacker with the disk.
+- Encryption needs WebCrypto: https or localhost only. The PIN dialog says so when unavailable.
+- Browser `online` events are not fired by puppeteer's `setOfflineMode(false)`; dispatch `window.dispatchEvent(new Event('online'))` in tests.
+- Spring Boot 4 error-message property is `spring.web.error.include-message` (already set).

@@ -1,0 +1,24 @@
+spring:
+  web:
+    error:
+      # Boot 4 moved this from server.error.*; the API's error messages (e.g. "Wrong username or password") need it.
+      include-message: always
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5434/team}
+    username: ${DB_USER:team}
+    password: ${DB_PASSWORD:team}
+app:
+  # Username + password accounts (no email, no password reset). Set false to close registration.
+  password-signup: ${APP_PASSWORD_SIGNUP:true}
+  # Where the app-encrypted daily backups are stored (one file per manager per day; the server cannot read them).
+  backup:
+    dir: ${APP_BACKUP_DIR:./backups}
+    keep-days: ${APP_BACKUP_KEEP_DAYS:14}
+server:
+  port: ${PORT:8081}
+  # Must match `base` in frontend/vite.config.js. A reverse proxy forwards /team/** unchanged.
+  servlet:
+    context-path: ${CONTEXT_PATH:/team}
+    session:
+      # Long-lived so the manager is not asked for the password every day; the app also has its own PIN lock.
+      timeout: 14d

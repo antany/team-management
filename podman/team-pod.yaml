@@ -1,0 +1,44 @@
+# App + Postgres + Cloudflare Tunnel in one pod. Nothing is published on the host:
+# the only way in is through the tunnel. Containers share localhost inside the pod.
+#   podman kube play podman/secrets.yaml podman/team-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: team
+spec:
+  containers:
+    - name: app
+      image: localhost/team-management:latest
+      env:
+        - { name: DB_URL, value: "jdbc:postgresql://localhost:5432/team" }
+        - { name: DB_USER, value: team }
+        - { name: DB_PASSWORD, valueFrom: { secretKeyRef: { name: team-secrets, key: db-password } } }
+        # Set to "false" once your account exists to close username/password sign-up.
+        - { name: APP_PASSWORD_SIGNUP, value: "true" }
+        - { name: SERVER_FORWARD_HEADERS_STRATEGY, value: framework }
+        - { name: SERVER_SERVLET_SESSION_COOKIE_SECURE, value: "true" }
+        - { name: APP_BACKUP_DIR, value: /backups }
+      volumeMounts:
+        - { name: backups, mountPath: /backups }
+    - name: postgres
+      image: docker.io/library/postgres:17
+      env:
+        - { name: POSTGRES_DB, value: team }
+        - { name: POSTGRES_USER, value: team }
+        - { name: POSTGRES_PASSWORD, valueFrom: { secretKeyRef: { name: team-secrets, key: db-password } } }
+      volumeMounts:
+        - { name: data, mountPath: /var/lib/postgresql/data }
+    - name: tunnel
+      image: docker.io/cloudflare/cloudflared:latest
+      args: ["tunnel", "--no-autoupdate", "run"]
+      env:
+        - { name: TUNNEL_TOKEN, valueFrom: { secretKeyRef: { name: team-secrets, key: tunnel-token } } }
+  volumes:
+    # Encrypted app backups. Create the dir and chown it first: mkdir -p ~/team-backups && podman unshare chown 10001:10001 ~/team-backups
+    - name: backups
+      hostPath:
+        path: /home/CHANGE-ME/team-backups
+        type: Directory
+    - name: data
+      persistentVolumeClaim:
+        claimName: team-prod-db-data

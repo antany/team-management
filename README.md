@@ -7,6 +7,26 @@ Contact details per person, daily PIN-encrypted JSON backups with restore, custo
 Spring Boot 4 / Java 25 / JDBC / Postgres backend, React (JSX) + MUI frontend, Gradle multi-project, podman.
 `CLAUDE.md` has the architecture; `docs/usage-and-deployment.html` is the people-facing guide.
 
+## Screenshots
+
+Demo data only. The calendar shades days by how many people are out (blue = one, orange = two, red = three or more) and leaves weekends and holidays alone.
+
+![Leave calendar with conflict highlighting](docs/screenshots/calendar.png)
+
+| Work allocation | Notes and follow-ups |
+| --- | --- |
+| ![Weekly load per person, over 100% flagged](docs/screenshots/work.png) | ![Follow-ups with overdue and upcoming](docs/screenshots/notes.png) |
+| **Team member** | **Review prep** |
+| ![Team member with contact details, notes, leave and work](docs/screenshots/member.png) | ![Review summary built from your own notes](docs/screenshots/review-prep.png) |
+
+Works as a phone-sized PWA and has a dark theme:
+
+| Home | Calendar | Work |
+| --- | --- | --- |
+| <img src="docs/screenshots/mobile-home.png" width="240"> | <img src="docs/screenshots/mobile-calendar.png" width="240"> | <img src="docs/screenshots/mobile-work.png" width="240"> |
+
+![Dark theme](docs/screenshots/work-dark.png)
+
 ## Run it locally
 
 ```bash
